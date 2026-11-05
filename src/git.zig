@@ -247,10 +247,13 @@ pub const GitHubRepoLanguages = struct {
         return null;
     }
 
-    pub fn findByPath(self: @This(), path: []const u8) ?*const LanguageDefinition {
+    pub fn findByPath(
+        self: @This(),
+        path: []const u8,
+        preferred_languages: []const []const u8,
+    ) ?*const LanguageDefinition {
         const basename = std.fs.path.basename(path);
 
-        // Filename-based matches first, matching Linguist's separate filename metadata.
         for (self.definitions) |*definition| {
             for (definition.filenames) |filename| {
                 if (std.mem.eql(u8, basename, filename)) {
@@ -259,18 +262,30 @@ pub const GitHubRepoLanguages = struct {
             }
         }
 
-        // Longest extension match wins, so `.d.ts` beats `.ts`, `.blade.php`
-        // beats `.php`, etc.
+        const no_rank: usize = std.math.maxInt(usize);
         var best: ?*const LanguageDefinition = null;
         var best_extension_len: usize = 0;
+        var best_rank: usize = no_rank;
 
         for (self.definitions) |*definition| {
-            for (definition.extensions) |extension| {
-                if (extension.len <= best_extension_len) continue;
-                if (endsWithIgnoreCase(path, extension)) {
-                    best = definition;
-                    best_extension_len = extension.len;
+            var language_rank: usize = no_rank;
+
+            for (preferred_languages, 0..) |name, index| {
+                if (std.mem.eql(u8, definition.name, name)) {
+                    language_rank = index;
+                    break;
                 }
+            }
+
+            for (definition.extensions) |extension| {
+                if (extension.len < best_extension_len) continue;
+                if (extension.len == best_extension_len and
+                    language_rank >= best_rank) continue;
+                if (!endsWithIgnoreCase(path, extension)) continue;
+
+                best = definition;
+                best_extension_len = extension.len;
+                best_rank = language_rank;
             }
         }
 
@@ -486,6 +501,7 @@ pub fn getLanguageStatsByLineChanges(
     repo: []const u8,
     emails: []const []const u8,
     languages: *const GitHubRepoLanguages,
+    preferred_languages: []const []const u8,
 ) ![]LanguageLineStats {
     if (!isInstalled(gpa, io)) return error.GitNotInstalled;
 
@@ -586,7 +602,7 @@ pub fn getLanguageStatsByLineChanges(
         const additions = std.fmt.parseUnsigned(u32, additions_raw, 10) catch continue;
         const deletions = std.fmt.parseUnsigned(u32, deletions_raw, 10) catch continue;
 
-        const definition = languages.findByPath(path);
+        const definition = languages.findByPath(path, preferred_languages);
         const language_stats =
             try getOrCreateLanguageLineStats(gpa, &stats, definition);
 

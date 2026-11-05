@@ -207,6 +207,17 @@ const Repository = struct {
         emails: [][]const u8,
         repo_languages: *const git.GitHubRepoLanguages,
     ) !void {
+        const repo_language_stats: []const Language =
+            if (self.languages) |known_languages| known_languages else &.{};
+
+        const preferred_languages: [][]const u8 =
+            try allocator.alloc([]const u8, repo_language_stats.len);
+        defer allocator.free(preferred_languages);
+
+        for (repo_language_stats, preferred_languages) |language, *name| {
+            name.* = language.name;
+        }
+
         const git_languages = try git.getLanguageStatsByLineChanges(
             allocator,
             io,
@@ -215,6 +226,7 @@ const Repository = struct {
             self.name,
             emails,
             repo_languages,
+            preferred_languages,
         );
         defer {
             for (git_languages) |language| {
